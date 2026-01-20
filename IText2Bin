@@ -1,2 +1,78 @@
-def Itext2Bin():
-  IText = input("Enter secret text")
+import base64
+import os
+import subprocess
+
+
+DEFAULT_LLAMA_ZIP_BIN = os.environ.get("LLAMA_ZIP_BIN", "llama-zip")
+DEFAULT_LLAMA_ZIP_MODEL = os.environ.get("LLAMA_ZIP_MODEL", "QK4M")
+DEFAULT_N_CTX = 8192
+DEFAULT_WINDOW = "25%"
+
+
+def IText2Bin(
+    text: str,
+    *,
+    llama_zip_bin: str = DEFAULT_LLAMA_ZIP_BIN,
+    model: str = DEFAULT_LLAMA_ZIP_MODEL,
+    n_ctx: int = DEFAULT_N_CTX,
+    window: str = DEFAULT_WINDOW,
+) -> str:
+    """Compress text with llama-zip and return a bitstring with header.
+
+    The llama-zip tool is expected to return base64-encoded bytes on stdout.
+    An 8-bit header is prepended to the payload bitstring containing the
+    length (in bits) of the encoded payload.
+    """
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+
+    cmd = [
+        llama_zip_bin,
+        "--n-ctx",
+        str(n_ctx),
+        "-w",
+        str(window),
+        "-m",
+        model,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            input=text.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"llama-zip binary not found: {llama_zip_bin}"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"llama-zip failed: {stderr}") from exc
+
+    b64_output = b"".join(result.stdout.split())
+    if not b64_output:
+        raise RuntimeError("llama-zip produced empty output")
+
+    try:
+        compressed_bytes = base64.b64decode(b64_output, validate=True)
+    except Exception as exc:
+        preview = b64_output[:120].decode("ascii", errors="replace")
+        raise ValueError(
+            f"llama-zip output is not valid base64: {preview}"
+        ) from exc
+
+    bit_len = len(compressed_bytes) * 8
+    if bit_len > 0xFF:
+        raise ValueError(
+            f"encoded payload too long for 8-bit header: {bit_len} bits"
+        )
+
+    header = f"{bit_len:08b}"
+    payload_bits = "".join(f"{byte:08b}" for byte in compressed_bytes)
+    return header + payload_bits
+
+
+__all__ = ["IText2Bin"]

@@ -1,2 +1,43 @@
-def Itext2Bin():
-  IText = input("Enter secret text")
+import os
+import subprocess
+
+
+def _bytes_to_bitstring(payload: bytes) -> str:
+    return "".join(f"{byte:08b}" for byte in payload)
+
+
+def IText2Bin(text: str, *, model_path: str | None = None, llama_zip_cmd: str = "llama-zip") -> str:
+    if not isinstance(text, str):
+        raise TypeError("text must be a str")
+
+    if model_path is None:
+        model_path = os.getenv("LLAMA_ZIP_MODEL_PATH", "QK4M")
+
+    cmd = [
+        llama_zip_cmd,
+        "--n-ctx",
+        "8192",
+        "-w",
+        "25%",
+        "--model",
+        model_path,
+    ]
+    result = subprocess.run(
+        cmd,
+        input=text.encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    payload = b"".join(result.stdout.split())
+    if not payload:
+        raise ValueError("llama-zip produced empty output")
+
+    payload_bits = _bytes_to_bitstring(payload)
+    payload_bit_length = len(payload_bits)
+    if payload_bit_length > 255:
+        raise ValueError("encoded bit length exceeds 8-bit header capacity")
+
+    header_bits = f"{payload_bit_length:08b}"
+    return header_bits + payload_bits

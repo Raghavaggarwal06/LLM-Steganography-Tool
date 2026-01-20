@@ -1,0 +1,2 @@
+def Itext2Bin():
+  IText = input("Enter secret text")

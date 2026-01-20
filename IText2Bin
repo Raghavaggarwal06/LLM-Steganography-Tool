@@ -1,2 +1,90 @@
-def Itext2Bin():
-  IText = input("Enter secret text")
+import base64
+import binascii
+import subprocess
+from typing import Iterable, List, Optional
+
+
+def _extract_base64_output(stdout: str) -> str:
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("llama-zip returned no output on stdout")
+    return lines[-1]
+
+
+def _build_llama_zip_command(
+    llama_zip_path: str,
+    model: str,
+    n_ctx: int,
+    window: str,
+    extra_args: Optional[Iterable[str]],
+) -> List[str]:
+    cmd = [
+        llama_zip_path,
+        "--n-ctx",
+        str(n_ctx),
+        "-w",
+        str(window),
+        "-m",
+        model,
+    ]
+    if extra_args:
+        cmd.extend(list(extra_args))
+    return cmd
+
+
+def IText2Bin(
+    text: str,
+    *,
+    llama_zip_path: str = "llama-zip",
+    model: str = "QK4M",
+    n_ctx: int = 8192,
+    window: str = "25%",
+    extra_args: Optional[Iterable[str]] = None,
+) -> str:
+    """
+    Compress text with llama-zip and return a bitstring with an 8-bit header.
+
+    The tool's stdout is expected to contain a base64-encoded payload, which is
+    decoded into bytes before conversion to a bitstring. An 8-bit header is
+    prepended that stores the length (in bits) of the encoded payload.
+    """
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+
+    cmd = _build_llama_zip_command(
+        llama_zip_path=llama_zip_path,
+        model=model,
+        n_ctx=n_ctx,
+        window=window,
+        extra_args=extra_args,
+    )
+
+    result = subprocess.run(
+        cmd,
+        input=text,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "llama-zip failed with code "
+            f"{result.returncode}: {result.stderr.strip()}"
+        )
+
+    base64_str = _extract_base64_output(result.stdout)
+    try:
+        encoded_bytes = base64.b64decode(base64_str, validate=True)
+    except binascii.Error as exc:
+        raise ValueError("llama-zip output is not valid base64") from exc
+
+    encoded_bits = "".join(f"{byte:08b}" for byte in encoded_bytes)
+    encoded_bit_len = len(encoded_bits)
+    if encoded_bit_len > 255:
+        raise ValueError(
+            "encoded bit length exceeds 8-bit header capacity "
+            f"({encoded_bit_len} bits)"
+        )
+
+    header = f"{encoded_bit_len:08b}"
+    return header + encoded_bits

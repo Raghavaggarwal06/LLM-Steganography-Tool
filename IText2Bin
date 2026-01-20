@@ -1,2 +1,22 @@
-def Itext2Bin():
-  IText = input("Enter secret text")
+#!/usr/bin/env python3
+
+"""
+Backward-compatible entrypoint script.
+
+This repo’s main API is implemented in `itext2bin.py` as `IText2Bin(text)`.
+"""
+
+from __future__ import annotations
+
+from itext2bin import IText2Bin
+
+
+def Itext2Bin() -> None:
+    """Interactive wrapper kept for compatibility."""
+    text = input("Enter secret text: ")
+    out_b64 = IText2Bin(text)
+    print(out_b64.decode("ascii"))
+
+
+if __name__ == "__main__":
+    Itext2Bin()

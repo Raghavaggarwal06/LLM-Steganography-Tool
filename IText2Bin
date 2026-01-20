@@ -1,10 +1,10 @@
 import os
 import shlex
 import subprocess
-from typing import Optional, Sequence, Union
+from typing import List, Optional, Sequence, Union
 
 
-def _normalize_command(command: Union[str, Sequence[str]]) -> list[str]:
+def _normalize_command(command: Union[str, Sequence[str]]) -> List[str]:
     if isinstance(command, str):
         return shlex.split(command)
     return list(command)

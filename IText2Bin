@@ -1,2 +1,74 @@
-def Itext2Bin():
-  IText = input("Enter secret text")
+import os
+import shlex
+import subprocess
+from typing import Optional, Sequence, Union
+
+
+def _normalize_command(command: Union[str, Sequence[str]]) -> list[str]:
+    if isinstance(command, str):
+        return shlex.split(command)
+    return list(command)
+
+
+def _bytes_to_bits(data: bytes) -> str:
+    return "".join(f"{byte:08b}" for byte in data)
+
+
+def IText2Bin(
+    input_text: str,
+    *,
+    llama_zip_cmd: Union[str, Sequence[str]] = "llama-zip",
+    model_path: Optional[str] = None,
+    n_ctx: int = 8192,
+    weight: str = "25%",
+    timeout_sec: int = 120,
+) -> str:
+    """
+    Compress input_text with llama-zip and return a bitstring with an 8-bit header.
+    The header encodes the length of the following encoded bits.
+    """
+    if not isinstance(input_text, str) or not input_text:
+        raise ValueError("input_text must be a non-empty string.")
+
+    if model_path is None:
+        model_path = (
+            os.environ.get("LLAMA_ZIP_MODEL_QK4M")
+            or os.environ.get("LLAMA_ZIP_MODEL")
+        )
+    if not model_path:
+        raise ValueError(
+            "model_path is required; set LLAMA_ZIP_MODEL_QK4M or pass model_path."
+        )
+
+    cmd = _normalize_command(llama_zip_cmd)
+    cmd.extend(["--n-ctx", str(n_ctx), "-w", weight, "--model", model_path])
+
+    result = subprocess.run(
+        cmd,
+        input=input_text.encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=timeout_sec,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"llama-zip failed (exit {result.returncode}): {stderr}")
+
+    encoded_b64 = b"".join(result.stdout.split())
+    if not encoded_b64:
+        raise RuntimeError("llama-zip produced empty output.")
+
+    encoded_bits = _bytes_to_bits(encoded_b64)
+    encoded_len = len(encoded_bits)
+    if encoded_len > 255:
+        raise ValueError(
+            f"Encoded bit length {encoded_len} exceeds 8-bit header capacity."
+        )
+    header = f"{encoded_len:08b}"
+    return header + encoded_bits
+
+
+if __name__ == "__main__":
+    IText = input("Enter secret text: ")
+    print(IText2Bin(IText))
